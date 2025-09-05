@@ -35,7 +35,10 @@ export async function createExcel({ username, branch, answers }) {
     ws.getRow(2).font = { bold: true };
     ws.getRow(3).font = { bold: true };
 
-    return await wb.xlsx.writeBuffer();
+    // ExcelJS в разных окружениях может возвращать ArrayBuffer.
+    // Преобразуем к Node.js Buffer, чтобы вложение в письме отправлялось корректно.
+    const out = await wb.xlsx.writeBuffer();
+    return Buffer.isBuffer(out) ? out : Buffer.from(out);
   } catch (error) {
     console.error('Error creating Excel file:', error);
     throw new Error('Failed to create Excel file');

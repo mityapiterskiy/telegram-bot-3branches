@@ -61,11 +61,24 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
   try {
     const [, qIdx, optIdx] = ctx.match;
     const state = userState.get(ctx.from.id) || {};
-    const branch = config.branches[state.branch];
-    
+    let branchIndex = state.branch;
+    let branch = config.branches[branchIndex];
+
+    // Fallback for serverless: recover branch by matching current question text
     if (!branch) {
-      await ctx.answerCbQuery('Ошибка: ветка не найдена');
-      return;
+      const currentText = ctx.update?.callback_query?.message?.text;
+      const qNumber = Number(qIdx);
+      const foundIndex = config.branches.findIndex(b => b.questions[qNumber]?.text === currentText);
+      if (foundIndex >= 0) {
+        branchIndex = foundIndex;
+        branch = config.branches[foundIndex];
+        state.branch = foundIndex;
+        state.answers = state.answers || [];
+        userState.set(ctx.from.id, state);
+      } else {
+        await ctx.answerCbQuery('Ошибка: ветка не найдена');
+        return;
+      }
     }
 
     state.answers = state.answers || [];

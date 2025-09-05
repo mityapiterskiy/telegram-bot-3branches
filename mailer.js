@@ -8,14 +8,18 @@ import nodemailer from 'nodemailer';
  */
 export async function sendMail(buffer, branchName, to) {
   try {
-    const transporter = nodemailer.createTransporter({
-      host: process.env.SMTP_HOST || 'smtp.yandex.ru',
-      port: Number(process.env.SMTP_PORT || 465),
-      secure: true, // Use SSL for Yandex
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
+    // Sanitize env vars (strip accidental newlines/spaces from Vercel env)
+    const host = (process.env.SMTP_HOST || 'smtp.yandex.ru').toString().trim();
+    const portStr = (process.env.SMTP_PORT || '465').toString().trim();
+    const port = Number(portStr);
+    const user = (process.env.SMTP_USER || '').toString().trim();
+    const pass = (process.env.SMTP_PASS || '').toString().trim();
+
+    let transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass }
     });
 
     // Verify connection configuration
@@ -35,12 +39,27 @@ export async function sendMail(buffer, branchName, to) {
       attachments: [
         {
           filename: `${branchName.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}_${Date.now()}.xlsx`,
-          content: buffer
+          content: Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer),
+          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         }
       ]
     };
 
-    const result = await transporter.sendMail(mailOptions);
+    let result;
+    try {
+      result = await transporter.sendMail(mailOptions);
+    } catch (primaryError) {
+      // Retry with STARTTLS on 587 if 465 fails (network/DNS/TLS quirks)
+      console.error('Primary SMTP send failed, retrying on 587 STARTTLS:', primaryError?.message);
+      transporter = nodemailer.createTransport({
+        host,
+        port: 587,
+        secure: false,
+        auth: { user, pass },
+        tls: { rejectUnauthorized: true }
+      });
+      result = await transporter.sendMail(mailOptions);
+    }
     console.log('Email sent successfully:', result.messageId);
     return result;
   } catch (error) {
