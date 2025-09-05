@@ -59,6 +59,8 @@ config.branches.forEach((branch, idx) => {
 // Answer handlers and branch navigation
 bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
   try {
+    // Always answer callback to stop Telegram's button loading/highlight state
+    try { await ctx.answerCbQuery(); } catch (_) {}
     const [, qIdx, optIdx] = ctx.match;
     const state = userState.get(ctx.from.id) || {};
     let branchIndex = state.branch;
