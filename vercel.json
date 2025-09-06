@@ -3,12 +3,6 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 60
-    },
-    "api/cron.js": {
-      "maxDuration": 60
-    },
-    "api/qstash.js": {
-      "maxDuration": 60
     }
   },
   "headers": [

@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import config from '../dialogueConfig.js';
 import { createExcel } from '../excel.js';
 import { sendMail } from '../mailer.js';
-import { setDelayedMessage, setupPostFinalHandlers } from '../timeoutHandler.js';
+// Removed delayed messaging
 
 // Load environment variables
 dotenv.config();
@@ -119,9 +119,6 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
         
         await ctx.reply('Спасибо! Ваши ответы записаны и отправлены для обработки.');
 
-        // Set delayed message (2 hours)
-        setDelayedMessage(bot, ctx.from.id, branch.delayed, branch.finalOptions);
-        
         console.log(`User ${ctx.from.id} completed branch: ${branch.label}`);
       } catch (error) {
         console.error('Error processing final results:', error);
@@ -139,8 +136,7 @@ bot.help((ctx) => {
   ctx.reply('Используйте /start для начала диагностики. Если возникли проблемы, начните заново с команды /start.');
 });
 
-// Setup post-final handlers for delayed messages
-setupPostFinalHandlers(bot);
+// Delayed message handlers removed
 
 // Handle unknown commands
 bot.on('message', (ctx) => {
