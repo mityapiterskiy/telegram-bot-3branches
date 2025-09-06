@@ -9,12 +9,20 @@
 // Redis-based scheduler: stores jobs for later pickup by cron worker
 import { Redis } from '@upstash/redis';
 
-const redis = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
-    })
-  : null;
+let cachedRedis = null;
+function getRedis() {
+  if (cachedRedis) return cachedRedis;
+  const url = (process.env.UPSTASH_REDIS_REST_URL || '').toString().trim();
+  const token = (process.env.UPSTASH_REDIS_REST_TOKEN || '').toString().trim();
+  if (!url || !token) return null;
+  try {
+    cachedRedis = new Redis({ url, token });
+    return cachedRedis;
+  } catch (e) {
+    console.error('Failed to init Redis client:', e);
+    return null;
+  }
+}
 
 async function scheduleWithQStash(userId, message, options, delayMs) {
   const token = process.env.QSTASH_TOKEN;
@@ -23,37 +31,30 @@ async function scheduleWithQStash(userId, message, options, delayMs) {
   if (!botToken) return false;
 
   const url = `https://qstash.upstash.io/v2/publish/${encodeURIComponent(
-    `https://api.telegram.org/bot${botToken}/sendMessage`
+    `${process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : ''}/api/qstash`
   )}`;
 
-  const body = {
-    chat_id: userId,
-    text: message,
-    ...(options
-      ? {
-          reply_markup: {
-            inline_keyboard: options.map(o => [{ text: o, callback_data: 'postfinal_' + o }]),
-          },
-        }
-      : {}),
-  };
+  const body = { userId, message, options };
 
   const headers = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
     'Upstash-Delay': `${Math.max(0, Math.floor(delayMs / 1000))}s`,
+    'Upstash-Method': 'POST',
+    'Upstash-Forward-Content-Type': 'application/json',
   };
 
   const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  const text = await resp.text().catch(() => '');
   if (!resp.ok) {
-    const txt = await resp.text().catch(() => '');
-    console.error('QStash schedule failed:', resp.status, txt);
+    console.error('QStash schedule failed:', resp.status, text);
     return false;
   }
+  console.log('QStash scheduled ok:', resp.status, text);
   return true;
 }
 
-export async function setDelayedMessage(bot, userId, message, options, delay = 2 * 60 * 60 * 1000) {
+export async function setDelayedMessage(bot, userId, message, options, delay = 10 * 1000) {
   // Prefer QStash direct scheduling to Telegram
   try {
     const ok = await scheduleWithQStash(userId, message, options, delay);
@@ -66,6 +67,7 @@ export async function setDelayedMessage(bot, userId, message, options, delay = 2
   }
 
   // Fallback to Redis zset (requires external cron)
+  const redis = getRedis();
   if (!redis) {
     console.warn('No Redis configured; delayed message cannot be scheduled.');
     return;
