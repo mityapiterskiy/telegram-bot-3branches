@@ -107,22 +107,22 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
       state.stage = 'final';
       userState.set(ctx.from.id, state);
 
-      try {
-        // Create Excel file and send email
-        const buffer = await createExcel({
-          username: ctx.from.username,
-          branch: branch.label,
-          answers: state.answers
-        });
-
-        await sendMail(buffer, branch.label, process.env.RECIPIENT_EMAIL);
-        
-        await ctx.reply('Спасибо! Ваши ответы записаны и отправлены для обработки.');
-
-        console.log(`User ${ctx.from.id} completed branch: ${branch.label}`);
-      } catch (error) {
-        console.error('Error processing final results:', error);
-        await ctx.reply('Ваши ответы записаны, но возникла проблема с отправкой. Мы свяжемся с вами.');
+      // Post-final flow per branch
+      const currentBranch = config.branches[branchIndex];
+      const finalKeyboard = currentBranch.finalOptions?.map((o, i) => [
+        Markup.button.callback(o, `postfinal_${currentBranch.key}_${i}`)
+      ]);
+      if (finalKeyboard && finalKeyboard.length) {
+        await ctx.reply(currentBranch.delayed, Markup.inlineKeyboard(finalKeyboard));
+      } else {
+        // If no postfinal options, finish immediately
+        try {
+          await sendResultsAndThankYou(ctx, branch.label, state);
+          console.log(`User ${ctx.from.id} completed branch: ${branch.label}`);
+        } catch (error) {
+          console.error('Error processing final results:', error);
+          await ctx.reply('Ваши ответы записаны, но возникла проблема с отправкой. Мы свяжемся с вами.');
+        }
       }
     }
   } catch (error) {
@@ -136,7 +136,105 @@ bot.help((ctx) => {
   ctx.reply('Используйте /start для начала диагностики. Если возникли проблемы, начните заново с команды /start.');
 });
 
-// Delayed message handlers removed
+// Post-final handlers
+bot.action(/postfinal_(.+)_(\d+)/, async (ctx) => {
+  try {
+    await ctx.answerCbQuery();
+    const branchKey = ctx.match[1];
+    const optIdx = Number(ctx.match[2]);
+    const state = userState.get(ctx.from.id) || {};
+    let branchIndex = state.branch;
+    let branch = config.branches.find(b => b.key === branchKey) || config.branches[branchIndex];
+
+    // Fallback: recover branch by choice label or by delayed message text
+    if (!branch) {
+      const msgText = ctx.update?.callback_query?.message?.text;
+      let foundIndex = config.branches.findIndex(b => b.key === branchKey);
+      if (foundIndex < 0 && msgText) {
+        foundIndex = config.branches.findIndex(b => b.delayed === msgText);
+      }
+      if (foundIndex >= 0) {
+        branchIndex = foundIndex;
+        branch = config.branches[foundIndex];
+        state.branch = foundIndex;
+        userState.set(ctx.from.id, state);
+      }
+    }
+
+    // If user selected a generic final action that requires extra group menu
+    const choiceText = branch?.finalOptions?.[optIdx];
+
+    if (branch?.key === 'client' && choiceText === 'Хочу в группу' && branch.groupMenu) {
+      // Record final choice before showing group menu
+      state.finalChoice = choiceText;
+      userState.set(ctx.from.id, state);
+      const kb = branch.groupMenu.options.map((o, i) => [Markup.button.callback(o, `group_${branch.key}_${i}`)]);
+      await ctx.editMessageText(branch.groupMenu.text, Markup.inlineKeyboard(kb));
+      return;
+    }
+    if (branch?.key === 'mixed' && (optIdx === 0 || optIdx === 1) && branch.groupMenu) {
+      // Record final choice ("Я клиент..." / "Я психолог...") before showing group menu
+      state.finalChoice = choiceText;
+      userState.set(ctx.from.id, state);
+      const kb = branch.groupMenu.options.map((o, i) => [Markup.button.callback(o, `group_${branch.key}_${i}`)]);
+      await ctx.editMessageText(branch.groupMenu.text, Markup.inlineKeyboard(kb));
+      return;
+    }
+
+    // Otherwise finalize immediately
+    state.finalChoice = choiceText;
+    userState.set(ctx.from.id, state);
+    await sendResultsAndThankYou(ctx, branch?.label || 'Неизвестная ветка', state);
+  } catch (error) {
+    console.error('Error in postfinal handler:', error);
+    await ctx.reply('Произошла ошибка. Попробуйте ещё раз.');
+  }
+});
+
+// Group selection handlers
+bot.action(/group_(.+)_(\d+)/, async (ctx) => {
+  try {
+    await ctx.answerCbQuery();
+    const branchKey = ctx.match[1];
+    const groupIdx = Number(ctx.match[2]);
+    const state = userState.get(ctx.from.id) || {};
+    let branch = config.branches.find(b => b.key === branchKey) || config.branches[state.branch];
+    // Fallback: infer branch by which branch offers this group option
+    if (!branch) {
+      const foundIndex = config.branches.findIndex(b => b.key === branchKey);
+      if (foundIndex >= 0) {
+        branch = config.branches[foundIndex];
+        state.branch = foundIndex;
+      }
+    }
+    const group = branch?.groupMenu?.options?.[groupIdx];
+    state.groupChoice = group;
+    userState.set(ctx.from.id, state);
+    await sendResultsAndThankYou(ctx, branch?.label || 'Неизвестная ветка', state);
+  } catch (error) {
+    console.error('Error in group handler:', error);
+    await ctx.reply('Произошла ошибка. Попробуйте ещё раз.');
+  }
+});
+
+async function sendResultsAndThankYou(ctx, branchLabel, state) {
+  // Extend answers with post-final choices if present
+  const enrichedAnswers = [...(state.answers || [])];
+  if (state.finalChoice) {
+    enrichedAnswers.push({ question: 'Выбор после диагностики', answer: state.finalChoice });
+  }
+  if (state.groupChoice) {
+    enrichedAnswers.push({ question: 'Выбранная группа', answer: state.groupChoice });
+  }
+
+  const buffer = await createExcel({
+    username: ctx.from.username,
+    branch: branchLabel,
+    answers: enrichedAnswers
+  });
+  await sendMail(buffer, branchLabel, process.env.RECIPIENT_EMAIL);
+  await ctx.reply('Спасибо! Ваши ответы записаны и отправлены для обработки.');
+}
 
 // Handle unknown commands
 bot.on('message', (ctx) => {
