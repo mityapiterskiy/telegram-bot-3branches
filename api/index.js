@@ -33,6 +33,8 @@ function initializeBot() {
   return { bot, userState };
 }
 
+({ bot, userState } = initializeBot());
+
 // Error handling middleware
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
@@ -150,6 +152,7 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
       const nextQ = branch.questions[nextQuestionIndex];
       console.log(`[9] Preparing next question for user ${ctx.from.id}: ${nextQ.text.substring(0, 50)}... (${Date.now() - startTime}ms)`);
 
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch (_) {}
       try {
         await ctx.deleteMessage();
         console.log(`[9.1] Previous question message deleted for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
@@ -164,6 +167,7 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
         )
       );
       console.log(`[10] Next question sent for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+      try { await ctx.answerCbQuery(); } catch (_) {}
       state.stage = `q_${nextQuestionIndex}`;
       userState.set(ctx.from.id, state);
       console.log(`[11] State updated and handler completed for user ${ctx.from.id}, total time: ${Date.now() - startTime}ms`);
