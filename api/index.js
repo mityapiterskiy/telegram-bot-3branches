@@ -49,6 +49,11 @@ bot.use(async (ctx, next) => {
   return next();
 });
 
+bot.on('callback_query', async (ctx, next) => {
+  try { await ctx.answerCbQuery(); } catch (_) {}
+  return next();
+});
+
 // Greeting and main menu
 bot.start(async (ctx) => {
   try {
