@@ -77,7 +77,7 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
   try {
     // Answer callback immediately to stop loading - multiple attempts for reliability
     let callbackAnswered = false;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       try {
         await ctx.answerCbQuery();
         callbackAnswered = true;
@@ -85,14 +85,14 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
         break;
       } catch (err) {
         console.log(`[1.${i+1}] Callback answer attempt ${i+1} failed for user ${ctx.from.id}:`, err.message);
-        if (i < 2) await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms before retry
+        if (i < 1) await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms before retry
       }
     }
 
     // Additional response with progress indicator
     if (!callbackAnswered && ctx.callbackQuery) {
       try {
-        await ctx.answerCbQuery('⏳ Обрабатываем...');
+        await ctx.answerCbQuery();
         console.log(`[2] Progress callback sent for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
       } catch (_) {}
     }
@@ -157,9 +157,6 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
         )
       );
       console.log(`[10] Message edited for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
-
-      // Some Telegram clients keep the spinner until another acknowledgement; be defensive
-      try { await ctx.answerCbQuery(); } catch (_) {}
       state.stage = `q_${nextQuestionIndex}`;
       userState.set(ctx.from.id, state);
       console.log(`[11] State updated and handler completed for user ${ctx.from.id}, total time: ${Date.now() - startTime}ms`);
