@@ -150,13 +150,20 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
       const nextQ = branch.questions[nextQuestionIndex];
       console.log(`[9] Preparing next question for user ${ctx.from.id}: ${nextQ.text.substring(0, 50)}... (${Date.now() - startTime}ms)`);
 
-      await ctx.editMessageText(
+      try {
+        await ctx.deleteMessage();
+        console.log(`[9.1] Previous question message deleted for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+      } catch (deleteError) {
+        console.log(`[WARN] Failed to delete previous message for user ${ctx.from.id}:`, deleteError.message);
+      }
+
+      await ctx.reply(
         nextQ.text,
         Markup.inlineKeyboard(
           nextQ.options.map((o, i) => [Markup.button.callback(o, `answer_${nextQuestionIndex}_${i}`)])
         )
       );
-      console.log(`[10] Message edited for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+      console.log(`[10] Next question sent for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
       state.stage = `q_${nextQuestionIndex}`;
       userState.set(ctx.from.id, state);
       console.log(`[11] State updated and handler completed for user ${ctx.from.id}, total time: ${Date.now() - startTime}ms`);
