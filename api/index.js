@@ -32,13 +32,21 @@ function initializeBot() {
   }
   return { bot, userState };
 }
-
-({ bot, userState } = initializeBot());
+// 🔧 Ensure the bot instance exists before registering handlers
+initializeBot();
 
 // Error handling middleware
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
   ctx.reply('Произошла ошибка. Попробуйте начать заново с команды /start');
+});
+
+// 🔧 Answer every callback query immediately to clear Telegram's loading state
+bot.use(async (ctx, next) => {
+  if (ctx.callbackQuery) {
+    try { await ctx.answerCbQuery(); } catch (_) {}
+  }
+  return next();
 });
 
 // Greeting and main menu
