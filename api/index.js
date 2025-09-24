@@ -18,8 +18,20 @@ if (missingVars.length > 0) {
   process.exit(1);
 }
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
-const userState = new Map();
+// Global bot instance to avoid cold start issues
+let bot;
+let userState;
+
+// Initialize bot and state
+function initializeBot() {
+  if (!bot) {
+    console.log('[INIT] Initializing bot instance...');
+    bot = new Telegraf(process.env.BOT_TOKEN);
+    userState = new Map();
+    console.log('[INIT] Bot initialized successfully');
+  }
+  return { bot, userState };
+}
 
 // Error handling middleware
 bot.catch((err, ctx) => {
@@ -63,15 +75,27 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
   console.log(`[START] Answer handler for user ${ctx.from.id}, qIdx: ${ctx.match[1]}, optIdx: ${ctx.match[2]}`);
 
   try {
-    // Always answer callback immediately to stop Telegram's button loading/highlight state
-    try { await ctx.answerCbQuery(); } catch (_) {}
-    console.log(`[1] Initial callback answered for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
-
-    // Additional immediate response for slow operations
-    if (ctx.callbackQuery) {
-      try { await ctx.answerCbQuery('Обрабатываем...'); } catch (_) {}
+    // Answer callback immediately to stop loading - multiple attempts for reliability
+    let callbackAnswered = false;
+    for (let i = 0; i < 3; i++) {
+      try {
+        await ctx.answerCbQuery();
+        callbackAnswered = true;
+        console.log(`[1.${i+1}] Callback answered attempt ${i+1} for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+        break;
+      } catch (err) {
+        console.log(`[1.${i+1}] Callback answer attempt ${i+1} failed for user ${ctx.from.id}:`, err.message);
+        if (i < 2) await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms before retry
+      }
     }
-    console.log(`[2] Processing callback answered for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+
+    // Additional response with progress indicator
+    if (!callbackAnswered && ctx.callbackQuery) {
+      try {
+        await ctx.answerCbQuery('⏳ Обрабатываем...');
+        console.log(`[2] Progress callback sent for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+      } catch (_) {}
+    }
 
     const [, qIdx, optIdx] = ctx.match;
     const state = userState.get(ctx.from.id) || {};
@@ -288,22 +312,38 @@ bot.on('message', (ctx) => {
 
 // Export handler for Vercel
 export default async function handler(req, res) {
+  const requestStart = Date.now();
+
+  // Initialize bot for each request to ensure it's ready
+  const { bot } = initializeBot();
+  console.log(`[WEBHOOK] ${req.method} request received at ${new Date().toISOString()}, bot initialized: ${!!bot}`);
+
   try {
     if (req.method === 'POST') {
-      // Handle Telegram webhook
+      console.log(`[WEBHOOK] Processing Telegram update, body size: ${JSON.stringify(req.body).length} bytes`);
+      console.log(`[WEBHOOK] Update type:`, req.body?.message ? 'message' : req.body?.callback_query ? 'callback_query' : req.body?.inline_query ? 'inline_query' : 'other');
+
+      const updateStart = Date.now();
       await bot.handleUpdate(req.body);
+      const updateTime = Date.now() - updateStart;
+
+      console.log(`[WEBHOOK] Update processed successfully in ${updateTime}ms (total: ${Date.now() - requestStart}ms)`);
       res.status(200).json({ ok: true });
     } else if (req.method === 'GET') {
+      console.log(`[WEBHOOK] Health check requested (${Date.now() - requestStart}ms)`);
       // Health check endpoint
-      res.status(200).json({ 
+      res.status(200).json({
         status: 'Bot is running',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        botReady: !!bot
       });
     } else {
+      console.log(`[WEBHOOK] Method not allowed: ${req.method} (${Date.now() - requestStart}ms)`);
       res.status(405).json({ error: 'Method not allowed' });
     }
   } catch (error) {
-    console.error('Handler error:', error);
+    console.error(`[WEBHOOK ERROR] Handler error after ${Date.now() - requestStart}ms:`, error);
     res.status(500).json({ error: 'Internal server error' });
   }
 }
