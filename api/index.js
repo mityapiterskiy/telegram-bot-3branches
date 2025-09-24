@@ -43,6 +43,7 @@ bot.start(async (ctx) => {
 config.branches.forEach((branch, idx) => {
   bot.action(`branch_${branch.key}`, async (ctx) => {
     try {
+      try { await ctx.answerCbQuery(); } catch (_) {}
       userState.set(ctx.from.id, { stage: 'q_0', branch: idx, answers: [] });
       const q = branch.questions[0];
       await ctx.editMessageText(
@@ -99,6 +100,8 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
           nextQ.options.map((o, i) => [Markup.button.callback(o, `answer_${nextQuestionIndex}_${i}`)])
         )
       );
+      // Some Telegram clients keep the spinner until another acknowledgement; be defensive
+      try { await ctx.answerCbQuery(); } catch (_) {}
       state.stage = `q_${nextQuestionIndex}`;
       userState.set(ctx.from.id, state);
     } else {
