@@ -60,8 +60,12 @@ config.branches.forEach((branch, idx) => {
 // Answer handlers and branch navigation
 bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
   try {
-    // Always answer callback to stop Telegram's button loading/highlight state
+    // Always answer callback immediately to stop Telegram's button loading/highlight state
     try { await ctx.answerCbQuery(); } catch (_) {}
+    // Additional immediate response for slow operations
+    if (ctx.callbackQuery) {
+      try { await ctx.answerCbQuery('Обрабатываем...'); } catch (_) {}
+    }
     const [, qIdx, optIdx] = ctx.match;
     const state = userState.get(ctx.from.id) || {};
     let branchIndex = state.branch;
@@ -69,16 +73,28 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
 
     // Fallback for serverless: recover branch by matching current question text
     if (!branch) {
+      console.log(`Branch recovery needed for user ${ctx.from.id}, qIdx: ${qIdx}, state:`, state);
       const currentText = ctx.update?.callback_query?.message?.text;
       const qNumber = Number(qIdx);
-      const foundIndex = config.branches.findIndex(b => b.questions[qNumber]?.text === currentText);
+
+      // Try to find branch by question text - cache this operation
+      let foundIndex = -1;
+      for (let i = 0; i < config.branches.length; i++) {
+        if (config.branches[i].questions[qNumber]?.text === currentText) {
+          foundIndex = i;
+          break; // Found, no need to continue
+        }
+      }
+
       if (foundIndex >= 0) {
         branchIndex = foundIndex;
         branch = config.branches[foundIndex];
         state.branch = foundIndex;
         state.answers = state.answers || [];
         userState.set(ctx.from.id, state);
+        console.log(`Recovered branch ${branch.key} for user ${ctx.from.id}`);
       } else {
+        console.error(`Failed to recover branch for user ${ctx.from.id}, qIdx: ${qIdx}, question: ${currentText}`);
         await ctx.answerCbQuery('Ошибка: ветка не найдена');
         return;
       }
