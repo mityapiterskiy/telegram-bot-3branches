@@ -59,21 +59,32 @@ config.branches.forEach((branch, idx) => {
 
 // Answer handlers and branch navigation
 bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
+  const startTime = Date.now();
+  console.log(`[START] Answer handler for user ${ctx.from.id}, qIdx: ${ctx.match[1]}, optIdx: ${ctx.match[2]}`);
+
   try {
     // Always answer callback immediately to stop Telegram's button loading/highlight state
     try { await ctx.answerCbQuery(); } catch (_) {}
+    console.log(`[1] Initial callback answered for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+
     // Additional immediate response for slow operations
     if (ctx.callbackQuery) {
       try { await ctx.answerCbQuery('Обрабатываем...'); } catch (_) {}
     }
+    console.log(`[2] Processing callback answered for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+
     const [, qIdx, optIdx] = ctx.match;
     const state = userState.get(ctx.from.id) || {};
+    console.log(`[3] Match parsed for user ${ctx.from.id}, state:`, state, `(${Date.now() - startTime}ms)`);
+
     let branchIndex = state.branch;
     let branch = config.branches[branchIndex];
+    console.log(`[4] Branch retrieved for user ${ctx.from.id}, branchIndex: ${branchIndex}, hasBranch: ${!!branch} (${Date.now() - startTime}ms)`);
 
     // Fallback for serverless: recover branch by matching current question text
     if (!branch) {
-      console.log(`Branch recovery needed for user ${ctx.from.id}, qIdx: ${qIdx}, state:`, state);
+      const fallbackStartTime = Date.now();
+      console.log(`[5] Branch recovery needed for user ${ctx.from.id}, qIdx: ${qIdx}, state:`, state, `(${Date.now() - startTime}ms)`);
       const currentText = ctx.update?.callback_query?.message?.text;
       const qNumber = Number(qIdx);
 
@@ -92,9 +103,9 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
         state.branch = foundIndex;
         state.answers = state.answers || [];
         userState.set(ctx.from.id, state);
-        console.log(`Recovered branch ${branch.key} for user ${ctx.from.id}`);
+        console.log(`[6] Recovered branch ${branch.key} for user ${ctx.from.id} (${Date.now() - startTime}ms, fallback took ${Date.now() - fallbackStartTime}ms)`);
       } else {
-        console.error(`Failed to recover branch for user ${ctx.from.id}, qIdx: ${qIdx}, question: ${currentText}`);
+        console.error(`[ERROR] Failed to recover branch for user ${ctx.from.id}, qIdx: ${qIdx}, question: ${currentText} (${Date.now() - startTime}ms)`);
         await ctx.answerCbQuery('Ошибка: ветка не найдена');
         return;
       }
@@ -105,22 +116,31 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
       question: branch.questions[Number(qIdx)].text,
       answer: branch.questions[Number(qIdx)].options[optIdx]
     });
+    console.log(`[7] Answer saved for user ${ctx.from.id}, qIdx: ${qIdx} (${Date.now() - startTime}ms)`);
 
     // Next question or final result
     const nextQuestionIndex = Number(qIdx) + 1;
+    console.log(`[8] Next question index: ${nextQuestionIndex}, total questions: ${branch.questions.length} for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+
     if (nextQuestionIndex < branch.questions.length) {
       const nextQ = branch.questions[nextQuestionIndex];
+      console.log(`[9] Preparing next question for user ${ctx.from.id}: ${nextQ.text.substring(0, 50)}... (${Date.now() - startTime}ms)`);
+
       await ctx.editMessageText(
         nextQ.text,
         Markup.inlineKeyboard(
           nextQ.options.map((o, i) => [Markup.button.callback(o, `answer_${nextQuestionIndex}_${i}`)])
         )
       );
+      console.log(`[10] Message edited for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
+
       // Some Telegram clients keep the spinner until another acknowledgement; be defensive
       try { await ctx.answerCbQuery(); } catch (_) {}
       state.stage = `q_${nextQuestionIndex}`;
       userState.set(ctx.from.id, state);
+      console.log(`[11] State updated and handler completed for user ${ctx.from.id}, total time: ${Date.now() - startTime}ms`);
     } else {
+      console.log(`[12] Final stage reached for user ${ctx.from.id}, qIdx: ${qIdx} (${Date.now() - startTime}ms)`);
       // End of questions - remove the last question message and show diagnosis separately
       try { await ctx.deleteMessage(); } catch (_) {}
       await ctx.reply(branch.diagnosis);
@@ -134,11 +154,13 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
       ]);
       if (finalKeyboard && finalKeyboard.length) {
         await ctx.reply(currentBranch.delayed, Markup.inlineKeyboard(finalKeyboard));
+        console.log(`[13] Final options sent for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
       } else {
+        console.log(`[14] No final options, sending results for user ${ctx.from.id} (${Date.now() - startTime}ms)`);
         // If no postfinal options, finish immediately
         try {
           await sendResultsAndThankYou(ctx, branch.label, state);
-          console.log(`User ${ctx.from.id} completed branch: ${branch.label}`);
+          console.log(`User ${ctx.from.id} completed branch: ${branch.label} (total time: ${Date.now() - startTime}ms)`);
         } catch (error) {
           console.error('Error processing final results:', error);
           await ctx.reply('Ваши ответы записаны, но возникла проблема с отправкой. Мы свяжемся с вами.');
@@ -146,7 +168,7 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
       }
     }
   } catch (error) {
-    console.error('Error in answer handler:', error);
+    console.error(`[ERROR] Error in answer handler for user ${ctx.from.id}:`, error, `(total time: ${Date.now() - startTime}ms)`);
     await ctx.answerCbQuery('Произошла ошибка, попробуйте еще раз.');
   }
 });
