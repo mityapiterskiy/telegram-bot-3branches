@@ -105,8 +105,9 @@ bot.action(/answer_(\d+)_(\d+)/, async (ctx) => {
       state.stage = `q_${nextQuestionIndex}`;
       userState.set(ctx.from.id, state);
     } else {
-      // End of questions - show diagnosis and process results
-      await ctx.editMessageText(branch.diagnosis);
+      // End of questions - remove the last question message and show diagnosis separately
+      try { await ctx.deleteMessage(); } catch (_) {}
+      await ctx.reply(branch.diagnosis);
       state.stage = 'final';
       userState.set(ctx.from.id, state);
 
