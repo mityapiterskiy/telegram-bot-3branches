@@ -143,7 +143,7 @@ bot.help((ctx) => {
 // Post-final handlers
 bot.action(/postfinal_(.+)_(\d+)/, async (ctx) => {
   try {
-    await ctx.answerCbQuery();
+    try { await ctx.answerCbQuery(); } catch (_) {}
     const branchKey = ctx.match[1];
     const optIdx = Number(ctx.match[2]);
     const state = userState.get(ctx.from.id) || {};
@@ -185,7 +185,8 @@ bot.action(/postfinal_(.+)_(\d+)/, async (ctx) => {
       return;
     }
 
-    // Otherwise finalize immediately
+    // Otherwise finalize immediately: remove the final options message and finish
+    try { await ctx.deleteMessage(); } catch (_) {}
     state.finalChoice = choiceText;
     userState.set(ctx.from.id, state);
     await sendResultsAndThankYou(ctx, branch?.label || 'Неизвестная ветка', state);
@@ -198,7 +199,7 @@ bot.action(/postfinal_(.+)_(\d+)/, async (ctx) => {
 // Group selection handlers
 bot.action(/group_(.+)_(\d+)/, async (ctx) => {
   try {
-    await ctx.answerCbQuery();
+    try { await ctx.answerCbQuery(); } catch (_) {}
     const branchKey = ctx.match[1];
     const groupIdx = Number(ctx.match[2]);
     const state = userState.get(ctx.from.id) || {};
@@ -211,6 +212,8 @@ bot.action(/group_(.+)_(\d+)/, async (ctx) => {
         state.branch = foundIndex;
       }
     }
+    // Delete the group selection message to remove its inline keyboard
+    try { await ctx.deleteMessage(); } catch (_) {}
     const group = branch?.groupMenu?.options?.[groupIdx];
     state.groupChoice = group;
     userState.set(ctx.from.id, state);
